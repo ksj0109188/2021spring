@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+      PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+   "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="mapper.board">
+<resultMap id="articlesResult" type="articleVO">
+    <result property="level" column="level" />
+    <result property="articleNO" column="articleNO" />
+    <result property="parentNO" column="parentNO" />
+    <result property="title" column="title" />
+    <result property="content" column="content" />
+    <result property="writeDate" column="writeDate" />
+    <result property="imageFileName" column="imageFileName" />
+    <result property="subCount" column="subCount"></result>
+  </resultMap> 
+  
+  <resultMap id="imgResult" type="imageVO">
+	  <result property="imageFileNO" column="imageFileNO" />
+	  <result property="articleNO" column="articleNO" />
+	  <result property="imageFileName" column="imageFileName" />
+ </resultMap>
+ <!-- 저장된 function  -->
+<!--     DELIMITER $$
+CREATE FUNCTION search_board() RETURNS INT
+NOT DETERMINISTIC 
+READS SQL DATA
+
+BEGIN
+
+	DECLARE v_id INT;
+	DECLARE v_parent INT;
+	DECLARE CONTINUE HANDLER FOR NOT FOUND SET @id = NULL;
+	
+	SET v_parent = @id;
+	SET v_id = -1;
+	
+	IF @id IS NULL THEN
+			RETURN NULL;
+	END IF;
+	
+	LOOP
+	
+	SELECT MIN(`articleNO`)
+	INTO @id
+	FROM t_board
+	WHERE parentNO = v_parent AND articleNO>v_id;
+	
+	IF(@id IS NOT NULL) OR (v_parent = @start_with) THEN
+	SET @level = @level +1;
+	RETURN @id;
+	END IF;
+	
+	SET @level := @level -1;
+	
+	SELECT articleNO, parentNO
+	INTO v_id, v_parent
+	FROM t_board
+	WHERE articleNO = v_parent;
+	
+	END LOOP;
+END
+$$
+DELIMITER;  */ -->
+  <select id="selectAllArticlesList" resultMap="articlesResult"   >
+    <![CDATA[
+      SELECT CASE WHEN LEVEL-1 > 0 then CONCAT(CONCAT(REPEAT('    ', level  - 1)), t_board.title)
+                 ELSE t_board.title
+           END  as title, level, t_board.id as id, t_board.articleNO as articleNO,t_board.writeDate, subCount
+  		FROM
+     	(SELECT search_board() AS id, @level AS level
+        FROM (SELECT @start_with:=0, @id:=@start_with, @level:=0) vars JOIN t_board
+         WHERE @id IS NOT NULL) fnc
+  		JOIN t_board ON fnc.id = t_board.articleNO
+    ]]>
+  </select>
+  
+<!--	&lt;!&ndash;단일이미지 추가  &ndash;&gt;-->
+
+<!--  <insert id="insertNewArticle"  parameterType="java.util.Map">-->
+<!--		<![CDATA[-->
+<!--			INSERT into t_board(articleNO,  title, content, imageFileName, id, writeDate)-->
+<!--			VALUES(#{articleNO}, #{title},	#{content}, null ,	#{id}, NOW())-->
+<!--		]]>      -->
+<!--	</insert>-->
+	
+  <select id="selectNewArticleNO" resultType="int"  >
+		<![CDATA[
+			SELECT  max(articleNO)+1 from t_board		
+		]]>
+	</select>
+	
+  <select id="selectArticle" resultType="articleVO"   parameterType="int">
+    <![CDATA[
+      SELECT * from t_board
+      where articleNO = #{articleNO}		
+    ]]>
+  </select>
+
+    <update id="updateArticle"  parameterType="java.util.Map">
+			update t_board
+			set title=#{title},	content=#{content}
+			where articleNO=#{articleNO}
+	</update>
+
+    <update id="updateImage" parameterType="imageVO">
+            update t_imageFile
+            set imageFileName = #{imageFileName}
+            where articleNO= #{articleNO} and imageFileNO=#{imageFileNO}
+    </update>
+
+	<delete id="deleteArticle"  parameterType="int">
+    <![CDATA[
+        delete from t_board
+        where articleNO = #{articleNO} or articleNO in (
+            select articleNO
+            from(
+                    SELECT articleNO
+                    FROM(SELECT search_board() AS id, @level AS level
+                         FROM (SELECT @start_with:=#{articleNO}, @id:=@start_with, @level:=0) vars JOIN t_board
+                         WHERE @id IS NOT NULL) fnc
+                            JOIN t_board ON fnc.id = t_board.articleNO) as t1)
+    ]]>
+  </delete>
+
+ <!--다중 이미지 추가 SQL문 -->
+    <insert id="insertNewArticle"  parameterType="java.util.Map">
+    <![CDATA[
+      insert into t_board(articleNO, id, title, content, imageFileName, writeDate)
+      values(#{articleNO} ,#{id}, #{title}, #{content}, null , now())
+    ]]>      
+  </insert>
+
+    <insert id="insertReplyArticle"  parameterType="java.util.Map">
+    <![CDATA[
+        insert into t_board(articleNO, parentNO ,id, title, content, imageFileName, writeDate)
+        values(#{articleNO},#{parentNO} ,#{id}, #{title}, #{content}, null , now())
+        ]]>
+  </insert>
+ 
+   <insert id="insertNewImage"  parameterType="java.util.Map">
+     <![CDATA[INSERT INTO t_imageFile(imageFileNO, imageFileName, articleNO, regDate) VALUES]]>
+    <foreach item="item"  collection="list" separator=","  >
+      (#{item.imageFileNO}, #{item.imageFileName}, #{item.articleNO}, NOW())
+    </foreach>
+  </insert>
+
+ 
+  <select id="selectNewImageFileNO" resultType="int"  >
+    <![CDATA[
+      SELECT  IFNULL(max(imageFileNO),0) from t_imageFile
+    ]]>
+  </select>
+	
+
+  <select  id="selectImageFileList" resultMap="imgResult" parameterType="int">
+    <![CDATA[
+      SELECT * from t_imageFile
+      where articleNO=#{articleNO}	
+    ]]>
+  </select>
+
+    <select id="_board_Account" resultType="String" parameterType="java.util.Map">
+        SELECT id from t_member
+        <where>
+            <choose>
+            <when test="#{writer} != null and #{writer} !=''">
+                id = #{writer} and pwd = #{passwd}
+            </when>
+            <when test="#{writer} != null and #{writer} !=''">
+                id = #{writer} and pwd = #{passwd}
+            </when>
+                <when test="#{id} != null and #{id} !=''">
+                    id = #{id} and pwd = #{passwd}
+                </when>
+            </choose>
+        </where>
+  </select>
+    <update id="increaseSubconuter" parameterType="int">
+        UPDATE t_board
+        set subCount= subCount+1
+        where articleNO=#{articleNO}
+    </update>
+</mapper>
